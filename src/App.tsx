@@ -3,18 +3,14 @@ import './App.css'
 import {
   attackingStats,
   heroMatch,
+  leagueTable,
   momentumTrend,
   recentHighlights,
   tableInsights,
+  teams,
+  topScorers,
+  type Team,
 } from './data/mockData'
-import {
-  enrichTeamsWithStandings,
-  fetchPremierLeagueScorers,
-  fetchPremierLeagueStandings,
-  fetchPremierLeagueTeams,
-  fetchTeamDetail,
-} from './api/footballData'
-import type { LeagueStanding, TeamDetail, TeamSummary, TopScorer } from './types/football'
 
 type Route = {
   page: 'home' | 'teams' | 'team' | 'stats' | 'about'
@@ -82,152 +78,10 @@ const NavigationBar = ({ current, onNavigate }: NavigationProps) => (
 
 type HomePageProps = {
   onNavigate: (path: string) => void
-  standings: LeagueStanding[]
-  scorers: TopScorer[]
-  loading: boolean
-  error?: string | null
 }
 
-type LeaderboardMetric = 'goals' | 'assists' | 'contributions'
-
-const LeaderboardStatBlock = ({
-  leader,
-  metric,
-}: {
-  leader: TopScorer
-  metric: LeaderboardMetric
-}) => {
-  const goals = leader.goals ?? 0
-  const assists = leader.assists ?? 0
-
-  if (metric === 'contributions') {
-    const contributions = goals + assists
-    return (
-      <>
-        <div className="text-right">
-          <p className="text-lg font-semibold text-brand">{contributions}</p>
-          <p className="text-xs uppercase tracking-wide text-slate-500">Goal involvements</p>
-        </div>
-        <div className="flex flex-col text-xs text-slate-400">
-          <span>{goals} goals</span>
-          <span>{assists} assists</span>
-        </div>
-      </>
-    )
-  }
-
-  if (metric === 'goals') {
-    return (
-      <>
-        <div className="text-right">
-          <p className="text-lg font-semibold text-accent">{goals}</p>
-          <p className="text-xs uppercase tracking-wide text-slate-500">Goals</p>
-        </div>
-        <span className="text-xs text-slate-400">{assists} assists</span>
-      </>
-    )
-  }
-
-  return (
-    <>
-      <div className="text-right">
-        <p className="text-lg font-semibold text-amber-300">{assists}</p>
-        <p className="text-xs uppercase tracking-wide text-slate-500">Assists</p>
-      </div>
-      <span className="text-xs text-slate-400">{goals} goals</span>
-    </>
-  )
-}
-
-const LeaderboardCard = ({
-  title,
-  subtitle,
-  metric,
-  leaders,
-}: {
-  title: string
-  subtitle: string
-  metric: LeaderboardMetric
-  leaders: TopScorer[]
-}) => (
-  <div className="glass-card p-6">
-    <div className="flex items-center justify-between">
-      <h3 className="text-xl font-semibold text-slate-100">{title}</h3>
-      <span className="text-sm text-slate-400">{subtitle}</span>
-    </div>
-    {leaders.length === 0 ? (
-      <p className="mt-4 text-sm text-slate-400">Live leaderboards are unavailable at the moment.</p>
-    ) : (
-      <ul className="mt-4 space-y-3">
-        {leaders.slice(0, 5).map((leader, index) => (
-          <li
-            key={leader.id}
-            className="flex items-center justify-between rounded-xl border border-slate-800/70 bg-slate-900/40 px-4 py-3 text-sm"
-          >
-            <div className="flex items-center gap-3">
-              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand/20 font-semibold text-brand">
-                #{index + 1}
-              </span>
-              {leader.teamCrest && (
-                <img
-                  src={leader.teamCrest}
-                  alt={`${leader.team} crest`}
-                  className="h-9 w-9 rounded-full border border-slate-800/60 bg-slate-900/70 object-contain p-1"
-                />
-              )}
-              <div>
-                <p className="font-semibold text-slate-100">{leader.player}</p>
-                <p className="text-xs text-slate-400">{leader.team}</p>
-              </div>
-            </div>
-            <div className="flex items-end gap-5 text-right text-slate-300">
-              <LeaderboardStatBlock leader={leader} metric={metric} />
-            </div>
-          </li>
-        ))}
-      </ul>
-    )}
-  </div>
-)
-
-const HomePage = ({ onNavigate, standings, scorers, loading, error }: HomePageProps) => {
-  const goalLeaders = useMemo(
-    () => [...scorers].sort((a, b) => (b.goals ?? 0) - (a.goals ?? 0)),
-    [scorers],
-  )
-  const assistLeaders = useMemo(
-    () => [...scorers].sort((a, b) => (b.assists ?? 0) - (a.assists ?? 0)),
-    [scorers],
-  )
-  const contributionLeaders = useMemo(
-    () =>
-      [...scorers].sort(
-        (a, b) => (b.goals ?? 0) + (b.assists ?? 0) - ((a.goals ?? 0) + (a.assists ?? 0)),
-      ),
-    [scorers],
-  )
-
-  if (loading) {
-    return (
-      <section className="glass-card p-8 text-center text-slate-300">
-        <p className="text-sm uppercase tracking-[0.35em] text-slate-500">Fetching live data</p>
-        <p className="mt-3 text-lg text-white">Loading Premier League standings and leaders…</p>
-      </section>
-    )
-  }
-
-  if (error) {
-    return (
-      <section className="glass-card space-y-3 p-8 text-center text-slate-300">
-        <p className="text-lg font-semibold text-red-300">We couldn&apos;t load the live data.</p>
-        <p className="text-sm text-slate-400">
-          {error}. Try refreshing the page or checking your API token configuration.
-        </p>
-      </section>
-    )
-  }
-
-  const topFive = standings.slice(0, 5)
+const HomePage = ({ onNavigate }: HomePageProps) => {
+  const topFive = leagueTable.slice(0, 5)
 
   return (
     <div className="space-y-10">
@@ -293,11 +147,11 @@ const HomePage = ({ onNavigate, standings, scorers, loading, error }: HomePagePr
         </div>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+      <section className="grid gap-6 lg:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
         <div className="glass-card p-6">
           <div className="flex items-center justify-between">
             <h3 className="text-xl font-semibold text-slate-100">Top of the league</h3>
-            <span className="text-sm text-slate-400">Live standings</span>
+            <span className="text-sm text-slate-400">Matchday 9 snapshot</span>
           </div>
           <div className="mt-5 overflow-hidden rounded-xl border border-slate-800/70">
             <table className="min-w-full text-left text-sm">
@@ -335,39 +189,38 @@ const HomePage = ({ onNavigate, standings, scorers, loading, error }: HomePagePr
                     <td className="px-4 py-3 font-semibold text-brand">{entry.points}</td>
                   </tr>
                 ))}
-                {!topFive.length && (
-                  <tr>
-                    <td colSpan={8} className="px-4 py-6 text-center text-sm text-slate-400">
-                      Live standings are unavailable right now. Try again shortly.
-                    </td>
-                  </tr>
-                )}
               </tbody>
             </table>
           </div>
         </div>
 
-        <div className="flex flex-col gap-6">
-          <LeaderboardCard
-            title="Goal contribution leaders"
-            subtitle="Combined goals and assists"
-            metric="contributions"
-            leaders={contributionLeaders}
-          />
-          <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-1">
-            <LeaderboardCard
-              title="Golden Boot race"
-              subtitle="Most goals"
-              metric="goals"
-              leaders={goalLeaders}
-            />
-            <LeaderboardCard
-              title="Assist providers"
-              subtitle="Most assists"
-              metric="assists"
-              leaders={assistLeaders}
-            />
+        <div className="glass-card p-6">
+          <div className="flex items-center justify-between">
+            <h3 className="text-xl font-semibold text-slate-100">Top scorers</h3>
+            <span className="text-sm text-slate-400">Goals + assists</span>
           </div>
+          <ul className="mt-4 space-y-3">
+            {topScorers.map((scorer, index) => (
+              <li
+                key={scorer.id}
+                className="flex items-center justify-between rounded-xl border border-slate-800/70 bg-slate-900/40 px-4 py-3 text-sm"
+              >
+                <div className="flex items-center gap-3">
+                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand/20 font-semibold text-brand">
+                    #{index + 1}
+                  </span>
+                  <div>
+                    <p className="font-semibold text-slate-100">{scorer.player}</p>
+                    <p className="text-xs text-slate-400">{scorer.team}</p>
+                  </div>
+                </div>
+                <div className="flex items-center gap-5 text-slate-300">
+                  <span className="text-brand">{scorer.goals} G</span>
+                  <span>{scorer.assists} A</span>
+                </div>
+              </li>
+            ))}
+          </ul>
         </div>
       </section>
     </div>
@@ -376,103 +229,68 @@ const HomePage = ({ onNavigate, standings, scorers, loading, error }: HomePagePr
 
 type TeamsPageProps = {
   onNavigate: (path: string) => void
-  teams: TeamSummary[]
-  loading: boolean
-  error?: string | null
 }
 
-const TeamsPage = ({ onNavigate, teams, loading, error }: TeamsPageProps) => {
-  if (loading) {
-    return (
-      <section className="glass-card p-8 text-center text-slate-300">
-        <p className="text-sm uppercase tracking-[0.35em] text-slate-500">Synchronising clubs</p>
-        <p className="mt-3 text-lg text-white">Fetching Premier League club profiles…</p>
-      </section>
-    )
-  }
-
-  if (error) {
-    return (
-      <section className="glass-card space-y-3 p-8 text-center text-slate-300">
-        <p className="text-lg font-semibold text-red-300">Unable to load clubs right now.</p>
-        <p className="text-sm text-slate-400">{error}</p>
-      </section>
-    )
-  }
-
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-        <div>
-          <h2 className="page-title text-3xl font-semibold text-white">Premier League clubs</h2>
-          <p className="text-slate-300">Tap a crest to open the club hub with fixtures, form and squad lists.</p>
-        </div>
-        <button
-          type="button"
-          onClick={() => onNavigate('#/')}
-          className="rounded-full border border-slate-600 px-5 py-2 text-sm font-semibold text-slate-200 transition hover:border-brand/50 hover:text-brand"
-        >
-          Back to home
-        </button>
+const TeamsPage = ({ onNavigate }: TeamsPageProps) => (
+  <div className="space-y-6">
+    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+      <div>
+        <h2 className="page-title text-3xl font-semibold text-white">Premier League clubs</h2>
+        <p className="text-slate-300">Tap a crest to open the club hub with fixtures, form and star players.</p>
       </div>
-
-      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-        {teams.map((team) => {
-          const formBadge = team.form?.split(',').join(' ') ?? 'N/A'
-          return (
-            <article key={team.id} className="team-card">
-              <div className="flex items-center gap-4">
-                <img
-                  src={team.crest}
-                  alt={`${team.name} crest`}
-                  className="h-16 w-16 rounded-full border border-slate-700/70 bg-slate-900/60 p-2"
-                />
-                <div>
-                  <h3 className="text-lg font-semibold text-white">{team.name}</h3>
-                  <p className="text-sm text-slate-400">{team.founded ? `Founded ${team.founded}` : team.venue}</p>
-                </div>
-              </div>
-              <div className="flex flex-wrap gap-2 text-xs text-slate-400">
-                {team.coach && <span className="rounded-full bg-slate-900/60 px-3 py-1">Coach: {team.coach}</span>}
-                {team.venue && <span className="rounded-full bg-slate-900/60 px-3 py-1">Venue: {team.venue}</span>}
-                {typeof team.points === 'number' && (
-                  <span className="rounded-full bg-brand/15 px-3 py-1 text-brand">{team.points} pts</span>
-                )}
-                {typeof team.goalDifference === 'number' && (
-                  <span className="rounded-full bg-accent/15 px-3 py-1 text-accent">GD {team.goalDifference}</span>
-                )}
-              </div>
-              <div className="flex items-center justify-between text-sm text-slate-300">
-                <span>
-                  Form:{' '}
-                  <span className="font-semibold text-brand">{formBadge}</span>
-                </span>
-                {team.clubColors && <span>{team.clubColors}</span>}
-              </div>
-              <button
-                type="button"
-                onClick={() => onNavigate(`#/team/${team.id}`)}
-                className="rounded-full bg-accent/20 px-4 py-2 text-sm font-semibold text-accent transition hover:bg-accent/30"
-              >
-                View club hub
-              </button>
-            </article>
-          )
-        })}
-        {!teams.length && (
-          <div className="glass-card p-6 text-center text-slate-300">
-            <p>No clubs to display at the moment. Refresh to try again.</p>
-          </div>
-        )}
-      </div>
+      <button
+        type="button"
+        onClick={() => onNavigate('#/')}
+        className="rounded-full border border-slate-600 px-5 py-2 text-sm font-semibold text-slate-200 transition hover:border-brand/50 hover:text-brand"
+      >
+        Back to home
+      </button>
     </div>
-  )
-}
+
+    <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+      {teams.map((team) => (
+        <article key={team.id} className="team-card">
+          <div className="flex items-center gap-4">
+            <img
+              src={team.logo}
+              alt={`${team.name} crest`}
+              className="h-16 w-16 rounded-full border border-slate-700/70 bg-slate-900/60 p-2"
+            />
+            <div>
+              <h3 className="text-lg font-semibold text-white">{team.name}</h3>
+              <p className="text-sm text-slate-400">Founded {team.founded}</p>
+            </div>
+          </div>
+          <p className="text-sm leading-relaxed text-slate-300">{team.description}</p>
+          <div className="flex flex-wrap gap-2 text-xs text-slate-400">
+            {team.strengths.map((strength) => (
+              <span key={strength} className="rounded-full bg-slate-900/60 px-3 py-1">
+                {strength}
+              </span>
+            ))}
+          </div>
+          <div className="flex items-center justify-between text-sm text-slate-300">
+            <span>
+              Form:{' '}
+              <span className="font-semibold text-brand">{team.lastFive.join(' ')}</span>
+            </span>
+            <span>{team.stadium}</span>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigate(`#/team/${team.id}`)}
+            className="rounded-full bg-accent/20 px-4 py-2 text-sm font-semibold text-accent transition hover:bg-accent/30"
+          >
+            View club hub
+          </button>
+        </article>
+      ))}
+    </div>
+  </div>
+)
 
 type TeamPageProps = {
-  team?: TeamDetail
-  loading: boolean
-  error?: string | null
+  team?: Team
   onNavigate: (path: string) => void
 }
 
@@ -491,38 +309,13 @@ const OutcomeBadge = ({ outcome }: { outcome: 'W' | 'D' | 'L' }) => {
   )
 }
 
-const TeamDetailsPage = ({ team, loading, error, onNavigate }: TeamPageProps) => {
-  if (loading) {
-    return (
-      <section className="glass-card p-8 text-center text-slate-300">
-        <p className="text-sm uppercase tracking-[0.35em] text-slate-500">Building club hub</p>
-        <p className="mt-3 text-lg text-white">Loading fixtures, results and squad details…</p>
-      </section>
-    )
-  }
-
-  if (error) {
-    return (
-      <section className="glass-card space-y-3 p-8 text-center text-slate-300">
-        <p className="text-lg font-semibold text-red-300">We couldn&apos;t load that club.</p>
-        <p className="text-sm text-slate-400">{error}</p>
-        <button
-          type="button"
-          onClick={() => onNavigate('#/teams')}
-          className="mx-auto mt-2 inline-flex items-center justify-center rounded-full border border-slate-600 px-5 py-2 text-sm font-semibold text-slate-200 transition hover:border-brand/50 hover:text-brand"
-        >
-          Back to teams
-        </button>
-      </section>
-    )
-  }
-
+const TeamDetailsPage = ({ team, onNavigate }: TeamPageProps) => {
   if (!team) {
     return (
       <div className="glass-card p-8 text-center">
         <h2 className="page-title text-3xl font-semibold text-white">Team not found</h2>
         <p className="mt-3 text-slate-300">
-          We couldn&apos;t locate that club in the live dataset. Try heading back to the teams overview.
+          We couldn&apos;t locate that club in our data set. Try heading back to the teams overview.
         </p>
         <button
           type="button"
@@ -535,8 +328,6 @@ const TeamDetailsPage = ({ team, loading, error, onNavigate }: TeamPageProps) =>
     )
   }
 
-  const stats = team.stats
-
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -548,14 +339,14 @@ const TeamDetailsPage = ({ team, loading, error, onNavigate }: TeamPageProps) =>
           ← All clubs
         </button>
         <div className="text-right text-sm text-slate-400 md:text-left">
-          <p>Live snapshot from football-data.org</p>
+          <p>Last updated: Matchday 9 snapshot</p>
         </div>
       </div>
 
       <section className="gradient-border">
         <div className="gradient-inner grid gap-6 md:grid-cols-[auto_minmax(0,1fr)]">
           <img
-            src={team.crest}
+            src={team.logo}
             alt={`${team.name} crest`}
             className="mx-auto h-28 w-28 rounded-full border border-brand/40 bg-slate-900/70 p-4"
           />
@@ -563,12 +354,11 @@ const TeamDetailsPage = ({ team, loading, error, onNavigate }: TeamPageProps) =>
             <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
               <div>
                 <h2 className="page-title text-4xl font-bold text-white">{team.name}</h2>
-                <p className="text-sm uppercase tracking-[0.35em] text-slate-500">{team.venue}</p>
+                <p className="text-sm uppercase tracking-[0.35em] text-slate-500">{team.stadium}</p>
               </div>
               <div className="flex flex-wrap gap-2 text-xs text-slate-300 md:justify-end">
-                {team.coach && <span className="rounded-full bg-brand/20 px-3 py-1 text-brand">Coach: {team.coach}</span>}
-                {team.founded && <span className="rounded-full bg-slate-900/60 px-3 py-1">Founded {team.founded}</span>}
-                {team.clubColors && <span className="rounded-full bg-slate-900/60 px-3 py-1">Colours: {team.clubColors}</span>}
+                <span className="rounded-full bg-brand/20 px-3 py-1 text-brand">Coach: {team.coach}</span>
+                <span className="rounded-full bg-slate-900/60 px-3 py-1">Founded {team.founded}</span>
               </div>
             </div>
             <p className="text-slate-200">{team.description}</p>
@@ -580,18 +370,16 @@ const TeamDetailsPage = ({ team, loading, error, onNavigate }: TeamPageProps) =>
               ))}
             </div>
             <div className="flex flex-wrap items-center gap-3 text-sm text-slate-300">
-              <span className="stat-badge">Form: {team.lastFive.join(' ') || 'N/A'}</span>
-              {stats && (
-                <>
-                  <span className="rounded-full bg-accent/20 px-3 py-1 text-accent">
-                    W {stats.wins} · D {stats.draws} · L {stats.losses}
-                  </span>
-                  <span className="rounded-full bg-slate-900/60 px-3 py-1">
-                    Goals: {stats.goalsFor} for / {stats.goalsAgainst} against
-                  </span>
-                  <span className="rounded-full bg-brand/20 px-3 py-1 text-brand">{stats.points} points</span>
-                </>
-              )}
+              <span className="stat-badge">Form: {team.lastFive.join(' ')}</span>
+              <span className="rounded-full bg-accent/20 px-3 py-1 text-accent">
+                W {team.stats.wins} · D {team.stats.draws} · L {team.stats.losses}
+              </span>
+              <span className="rounded-full bg-slate-900/60 px-3 py-1">
+                Goals: {team.stats.goalsFor} for / {team.stats.goalsAgainst} against
+              </span>
+              <span className="rounded-full bg-brand/20 px-3 py-1 text-brand">
+                Clean sheets: {team.stats.cleanSheets}
+              </span>
             </div>
           </div>
         </div>
@@ -615,11 +403,6 @@ const TeamDetailsPage = ({ team, loading, error, onNavigate }: TeamPageProps) =>
                 </div>
               </li>
             ))}
-            {!team.upcomingFixtures.length && (
-              <li className="rounded-xl border border-slate-800/70 bg-slate-900/40 p-4 text-sm text-slate-400">
-                No scheduled fixtures found.
-              </li>
-            )}
           </ul>
         </div>
 
@@ -627,10 +410,7 @@ const TeamDetailsPage = ({ team, loading, error, onNavigate }: TeamPageProps) =>
           <h3 className="text-xl font-semibold text-white">Recent results</h3>
           <ul className="mt-4 space-y-3">
             {team.recentResults.map((result) => (
-              <li
-                key={result.id}
-                className="flex items-center justify-between rounded-xl border border-slate-800/70 bg-slate-900/40 px-4 py-3"
-              >
+              <li key={result.id} className="flex items-center justify-between rounded-xl border border-slate-800/70 bg-slate-900/40 px-4 py-3">
                 <div>
                   <p className="text-sm text-slate-400">{result.date}</p>
                   <p className="text-base font-semibold text-slate-100">
@@ -642,38 +422,28 @@ const TeamDetailsPage = ({ team, loading, error, onNavigate }: TeamPageProps) =>
                 <OutcomeBadge outcome={result.outcome} />
               </li>
             ))}
-            {!team.recentResults.length && (
-              <li className="rounded-xl border border-slate-800/70 bg-slate-900/40 p-4 text-sm text-slate-400">
-                Recent results not available.
-              </li>
-            )}
           </ul>
         </div>
       </section>
 
       <section className="glass-card p-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <h3 className="text-xl font-semibold text-white">Squad list</h3>
-          <span className="text-sm text-slate-400">Data provided by football-data.org</span>
+          <h3 className="text-xl font-semibold text-white">Key players</h3>
+          <span className="text-sm text-slate-400">Goal contributions this season</span>
         </div>
         <div className="mt-4 divide-y divide-slate-800/60">
-          {team.squad.map((player) => (
+          {team.players.map((player) => (
             <div key={player.id} className="flex flex-col gap-3 py-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <p className="font-semibold text-slate-100">{player.name}</p>
                 <p className="text-xs uppercase tracking-[0.35em] text-slate-500">{player.position}</p>
               </div>
-              <div className="flex gap-4 text-sm text-slate-300">
-                {player.shirtNumber && (
-                  <span className="rounded-full bg-brand/15 px-3 py-1 text-brand">#{player.shirtNumber}</span>
-                )}
-                <span className="rounded-full bg-slate-900/60 px-3 py-1">{player.nationality}</span>
+              <div className="flex gap-6 text-sm text-slate-300">
+                <span className="rounded-full bg-brand/15 px-3 py-1 text-brand">{player.goals} goals</span>
+                <span className="rounded-full bg-accent/15 px-3 py-1 text-accent">{player.assists} assists</span>
               </div>
             </div>
           ))}
-          {!team.squad.length && (
-            <p className="py-4 text-sm text-slate-400">Squad information not yet available.</p>
-          )}
         </div>
       </section>
     </div>
@@ -831,9 +601,9 @@ const AboutPage = () => (
       experience.
     </p>
     <p className="text-slate-300">
-      Live tables, scorers and club hubs are powered by the football-data.org API using the
-      <code className="mx-1 rounded bg-slate-900 px-1.5 py-0.5">X-Auth-Token</code> header. Mocked analytics
-      blocks remain to showcase richer visualisations until the live endpoints expose similar stats.
+      Data is mocked to showcase the layout, but the architecture is ready for live integrations
+      using the football-data.org API and an <code className="rounded bg-slate-900 px-1.5 py-0.5">X-Auth-Token</code>
+      header.
     </p>
     <div className="flex flex-wrap gap-3 text-sm text-slate-300">
       <span className="rounded-full bg-brand/20 px-3 py-1 text-brand">React + Vite</span>
@@ -853,7 +623,7 @@ const AboutPage = () => (
 
 const Footer = () => (
   <footer className="mt-16 flex flex-col items-center gap-3 text-xs text-slate-500 md:flex-row md:justify-between">
-    <p>Premier League Live Dashboard · Live data courtesy of football-data.org</p>
+    <p>Premier League Live Dashboard · Mock data refreshed Oct 2024</p>
     <p>
       Built with ⚽ by{' '}
       <a href="https://github.com/rhemanwoko" className="text-brand hover:text-accent">
@@ -865,14 +635,6 @@ const Footer = () => (
 
 const App = () => {
   const [route, setRoute] = useState<Route>(() => parseHash(window.location.hash))
-  const [standings, setStandings] = useState<LeagueStanding[]>([])
-  const [scorers, setScorers] = useState<TopScorer[]>([])
-  const [teams, setTeams] = useState<TeamSummary[]>([])
-  const [teamDetails, setTeamDetails] = useState<Record<string, TeamDetail>>({})
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
-  const [teamLoading, setTeamLoading] = useState(false)
-  const [teamError, setTeamError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!window.location.hash) {
@@ -884,58 +646,6 @@ const App = () => {
     return () => window.removeEventListener('hashchange', handler)
   }, [])
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true)
-      setError(null)
-      try {
-        const [table, scorersData, teamsData] = await Promise.all([
-          fetchPremierLeagueStandings(),
-          fetchPremierLeagueScorers(30),
-          fetchPremierLeagueTeams(),
-        ])
-        setStandings(table)
-        setScorers(scorersData)
-        setTeams(enrichTeamsWithStandings(teamsData, table))
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unexpected error fetching Premier League data'
-        setError(message)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    load()
-  }, [])
-
-  useEffect(() => {
-    if (route.page !== 'team') {
-      setTeamError(null)
-      setTeamLoading(false)
-      return
-    }
-
-    if (!route.teamId || !standings.length || teamDetails[route.teamId]) {
-      return
-    }
-
-    const loadTeam = async () => {
-      setTeamLoading(true)
-      setTeamError(null)
-      try {
-        const detail = await fetchTeamDetail(route.teamId!, standings)
-        setTeamDetails((prev) => ({ ...prev, [route.teamId!]: detail }))
-      } catch (err) {
-        const message = err instanceof Error ? err.message : 'Unexpected error fetching team details'
-        setTeamError(message)
-      } finally {
-        setTeamLoading(false)
-      }
-    }
-
-    void loadTeam()
-  }, [route, standings, teamDetails])
-
   const onNavigate = (path: string) => {
     const target = path.startsWith('#') ? path.slice(1) : path
     window.location.hash = target
@@ -944,10 +654,10 @@ const App = () => {
 
   const activeTeam = useMemo(() => {
     if (route.page === 'team' && route.teamId) {
-      return teamDetails[route.teamId]
+      return teams.find((club) => club.id === route.teamId)
     }
     return undefined
-  }, [route, teamDetails])
+  }, [route])
 
   return (
     <div className="app-shell space-y-10">
@@ -966,26 +676,9 @@ const App = () => {
       </header>
 
       <main className="space-y-12">
-        {route.page === 'home' && (
-          <HomePage
-            onNavigate={onNavigate}
-            standings={standings}
-            scorers={scorers}
-            loading={loading}
-            error={error}
-          />
-        )}
-        {route.page === 'teams' && (
-          <TeamsPage onNavigate={onNavigate} teams={teams} loading={loading} error={error} />
-        )}
-        {route.page === 'team' && (
-          <TeamDetailsPage
-            team={activeTeam}
-            loading={teamLoading || loading}
-            error={teamError || error}
-            onNavigate={onNavigate}
-          />
-        )}
+        {route.page === 'home' && <HomePage onNavigate={onNavigate} />}
+        {route.page === 'teams' && <TeamsPage onNavigate={onNavigate} />}
+        {route.page === 'team' && <TeamDetailsPage team={activeTeam} onNavigate={onNavigate} />}
         {route.page === 'stats' && <StatsPage onNavigate={onNavigate} />}
         {route.page === 'about' && <AboutPage />}
       </main>
