@@ -1,17 +1,22 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import "./App.css";
+import { attackingStats, momentumTrend, tableInsights } from "./data/mockData";
 import {
-  attackingStats,
-  heroMatch,
-  leagueTable,
-  momentumTrend,
-  recentHighlights,
-  tableInsights,
-  teams,
-  topScorers,
-  type Team,
-  type TopScorer,
-} from "./data/mockData";
+  enrichTeamsWithStandings,
+  fetchPremierLeagueScorers,
+  fetchPremierLeagueStandings,
+  fetchPremierLeagueTeams,
+  fetchRecentPremierLeagueMatches,
+  fetchTeamDetail,
+  fetchUpcomingPremierLeagueMatch,
+} from "./api/footballData";
+import type {
+  LeagueStanding,
+  MatchSummary,
+  TeamDetail,
+  TeamSummary,
+  TopScorer,
+} from "./types/football";
 
 type Route = {
   page: "home" | "teams" | "team" | "stats" | "about";
@@ -80,6 +85,12 @@ const NavigationBar = ({ current, onNavigate }: NavigationProps) => (
 
 type HomePageProps = {
   onNavigate: (path: string) => void;
+  standings: LeagueStanding[];
+  scorers: TopScorer[];
+  latestMatches: MatchSummary[];
+  featuredMatch: MatchSummary | null;
+  loading: boolean;
+  error?: string | null;
 };
 
 type LeaderboardMetric = "goals" | "assists" | "contributions";
@@ -91,8 +102,11 @@ const LeaderboardStatBlock = ({
   leader: TopScorer;
   metric: LeaderboardMetric;
 }) => {
+  const goals = leader.goals ?? 0;
+  const assists = leader.assists ?? 0;
+
   if (metric === "contributions") {
-    const contributions = leader.goals + leader.assists;
+    const contributions = goals + assists;
     return (
       <>
         <div className="text-right">
@@ -102,8 +116,8 @@ const LeaderboardStatBlock = ({
           </p>
         </div>
         <div className="flex flex-col text-xs text-slate-400">
-          <span>{leader.goals} goals</span>
-          <span>{leader.assists} assists</span>
+          <span>{goals} goals</span>
+          <span>{assists} assists</span>
         </div>
       </>
     );
@@ -113,12 +127,12 @@ const LeaderboardStatBlock = ({
     return (
       <>
         <div className="text-right">
-          <p className="text-lg font-semibold text-accent">{leader.goals}</p>
+          <p className="text-lg font-semibold text-accent">{goals}</p>
           <p className="text-xs uppercase tracking-wide text-slate-500">
             Goals
           </p>
         </div>
-        <span className="text-xs text-slate-400">{leader.assists} assists</span>
+        <span className="text-xs text-slate-400">{assists} assists</span>
       </>
     );
   }
@@ -126,12 +140,12 @@ const LeaderboardStatBlock = ({
   return (
     <>
       <div className="text-right">
-        <p className="text-lg font-semibold text-amber-300">{leader.assists}</p>
+        <p className="text-lg font-semibold text-amber-300">{assists}</p>
         <p className="text-xs uppercase tracking-wide text-slate-500">
           Assists
         </p>
       </div>
-      <span className="text-xs text-slate-400">{leader.goals} goals</span>
+      <span className="text-xs text-slate-400">{goals} goals</span>
     </>
   );
 };
@@ -152,64 +166,479 @@ const LeaderboardCard = ({
       <h3 className="text-xl font-semibold text-slate-100">{title}</h3>
       <span className="text-sm text-slate-400">{subtitle}</span>
     </div>
-    <ul className="mt-4 space-y-3">
-      {leaders.slice(0, 5).map((leader, index) => (
-        <li
-          key={leader.id}
-          className="flex items-center justify-between rounded-xl border border-slate-800/70 bg-slate-900/40 px-4 py-3 text-sm"
-        >
-          <div className="flex items-center gap-3">
-            <span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand/20 font-semibold text-brand">
-              #{index + 1}
-            </span>
-            <div>
-              <p className="font-semibold text-slate-100">{leader.player}</p>
-              <p className="text-xs text-slate-400">{leader.team}</p>
+    {leaders.length === 0 ? (
+      <p className="mt-4 text-sm text-slate-400">
+        Live leaderboards are unavailable at the moment.
+      </p>
+    ) : (
+      <ul className="mt-4 space-y-3">
+        {leaders.slice(0, 5).map((leader, index) => (
+          <li
+            key={leader.id}
+            className="flex items-center justify-between rounded-xl border border-slate-800/70 bg-slate-900/40 px-4 py-3 text-sm"
+          >
+            <div className="flex items-center gap-3">
+              <span className="flex h-9 w-9 items-center justify-center rounded-full bg-brand/20 font-semibold text-brand">
+                #{index + 1}
+              </span>
+              {leader.teamCrest && (
+                <img
+                  src={leader.teamCrest}
+                  alt={`${leader.team} crest`}
+                  className="h-9 w-9 rounded-full border border-slate-800/60 bg-slate-900/70 object-contain p-1"
+                />
+              )}
+              <div>
+                <p className="font-semibold text-slate-100">{leader.player}</p>
+                <p className="text-xs text-slate-400">{leader.team}</p>
+              </div>
             </div>
-          </div>
-          <div className="flex items-end gap-5 text-right text-slate-300">
-            <LeaderboardStatBlock leader={leader} metric={metric} />
-          </div>
-        </li>
-      ))}
-    </ul>
+            <div className="flex items-end gap-5 text-right text-slate-300">
+              <LeaderboardStatBlock leader={leader} metric={metric} />
+            </div>
+          </li>
+        ))}
+      </ul>
+    )}
   </div>
 );
 
-const HomePage = ({ onNavigate }: HomePageProps) => {
-  const topFive = leagueTable.slice(0, 5);
-  const goalLeaders = [...topScorers].sort((a, b) => b.goals - a.goals);
-  const assistLeaders = [...topScorers].sort((a, b) => b.assists - a.assists);
-  const contributionLeaders = [...topScorers].sort(
-    (a, b) => b.goals + b.assists - (a.goals + a.assists)
+const extractFormSequence = (form?: string, fallback?: string[]) => {
+  const raw = form && form.trim().length ? form : fallback?.join("");
+  if (!raw) return [];
+  return raw
+    .toUpperCase()
+    .replace(/[^WDL]/g, "")
+    .split("")
+    .slice(-5);
+};
+
+const scoreFormSequence = (sequence: string[]) =>
+  sequence.reduce((total, result) => {
+    if (result === "W") return total + 3;
+    if (result === "D") return total + 1;
+    return total;
+  }, 0);
+
+const FormBadges = ({
+  form,
+  size = "sm",
+  label = true,
+  fallback,
+  className,
+}: {
+  form?: string;
+  size?: "sm" | "md";
+  label?: boolean;
+  fallback?: string[];
+  className?: string;
+}) => {
+  const sequence = extractFormSequence(form, fallback);
+  const textClass = size === "md" ? "text-sm" : "text-xs";
+  if (!sequence.length) {
+    return null;
+  }
+  const colorMap: Record<string, string> = {
+    W: "text-brand",
+    D: "text-slate-300",
+    L: "text-red-300",
+  };
+  return (
+    <div
+      className={`flex items-center gap-2 ${textClass} text-slate-500 ${
+        className ?? ""
+      }`}
+    >
+      {label && <span>Form:</span>}
+      <div className="flex items-center gap-2">
+        {sequence.map((result, index) => (
+          <span
+            key={`${result}-${index}`}
+            className={`font-semibold ${colorMap[result] ?? "text-slate-200"}`}
+          >
+            {result}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+const HomePage = ({
+  onNavigate,
+  standings,
+  scorers,
+  latestMatches,
+  featuredMatch,
+  loading,
+  error,
+}: HomePageProps) => {
+  const goalLeaders = useMemo(
+    () => [...scorers].sort((a, b) => (b.goals ?? 0) - (a.goals ?? 0)),
+    [scorers]
+  );
+  const assistLeaders = useMemo(
+    () => [...scorers].sort((a, b) => (b.assists ?? 0) - (a.assists ?? 0)),
+    [scorers]
+  );
+  const contributionLeaders = useMemo(
+    () =>
+      [...scorers].sort(
+        (a, b) =>
+          (b.goals ?? 0) +
+          (b.assists ?? 0) -
+          ((a.goals ?? 0) + (a.assists ?? 0))
+      ),
+    [scorers]
+  );
+  const leagueTable = standings;
+  const latestFive = latestMatches.slice(0, 5);
+  const headlineMatch = featuredMatch ?? latestFive[0] ?? null;
+  const heroIsUpcoming =
+    headlineMatch &&
+    (headlineMatch.status === "SCHEDULED" || headlineMatch.status === "TIMED");
+  const heroHasScore =
+    headlineMatch &&
+    headlineMatch.homeScore !== null &&
+    headlineMatch.awayScore !== null &&
+    !heroIsUpcoming;
+
+  const topAttackingClubs = useMemo(
+    () =>
+      [...standings]
+        .sort((a, b) => b.goalsFor - a.goalsFor || b.points - a.points)
+        .slice(0, 3),
+    [standings]
   );
 
-  return (
-    <div className="space-y-10">
-      <section className="glass-card overflow-hidden">
-        <div className="grid gap-8 p-8 md:grid-cols-[1.1fr_minmax(0,1fr)]">
-          <div className="space-y-6">
-            <span className="stat-badge">Match of the week</span>
-            <div className="space-y-3">
-              <h2 className="page-title text-4xl font-bold text-white md:text-5xl">
-                {heroMatch.homeTeam}{" "}
-                <span className="text-brand">{heroMatch.homeScore}</span>
-                <span className="mx-2 text-slate-400">vs</span>
-                <span className="text-brand">{heroMatch.awayScore}</span>{" "}
-                {heroMatch.awayTeam}
-              </h2>
-              <p className="text-lg text-slate-300">{heroMatch.competition}</p>
-              <p className="text-sm uppercase tracking-[0.25em] text-slate-400">
-                {heroMatch.date}
-              </p>
-            </div>
-            <p className="max-w-2xl text-slate-200">
-              Arsenal&apos;s electric front line overwhelmed Chelsea at the
-              Emirates, with Bukayo Saka pulling the strings and new signing
-              Declan Rice dictating the tempo. Relive the key numbers, check the
-              league picture and catch what&apos;s next in this week&apos;s live
-              centre.
+  const bestDefensiveClubs = useMemo(
+    () =>
+      [...standings]
+        .sort((a, b) => a.goalsAgainst - b.goalsAgainst || b.points - a.points)
+        .slice(0, 3),
+    [standings]
+  );
+
+  const inFormClub = useMemo(() => {
+    if (!leagueTable.length) return null;
+    const scored = leagueTable.map((entry) => {
+      const formSeq = extractFormSequence(entry.form);
+      return {
+        entry,
+        formSeq,
+        score: scoreFormSequence(formSeq),
+      };
+    });
+    scored.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return b.entry.goalDifference - a.entry.goalDifference;
+    });
+    return scored[0];
+  }, [leagueTable]);
+
+  const topScorer = goalLeaders[0];
+
+  const leader = leagueTable[0];
+  const challenger = leagueTable[1];
+  let heroNarrative =
+    "Track the live table, scorers and latest results as the season unfolds.";
+  if (leader && challenger) {
+    const gap = leader.points - challenger.points;
+    if (gap === 0) {
+      heroNarrative = `${leader.team} and ${challenger.team} are level on ${leader.points} points at the summit.`;
+    } else {
+      const gapLabel =
+        Math.abs(gap) === 1 ? "1 point" : `${Math.abs(gap)} points`;
+      heroNarrative = `${leader.team} are ${gapLabel} clear of ${challenger.team} atop the table.`;
+    }
+  } else if (leader) {
+    heroNarrative = `${leader.team} set the pace with ${leader.points} points so far.`;
+  }
+
+  const formLeaderboard = useMemo(
+    () =>
+      leagueTable
+        .map((entry) => {
+          const seq = extractFormSequence(entry.form);
+          return {
+            entry,
+            seq,
+            score: scoreFormSequence(seq),
+          };
+        })
+        .filter((item) => item.seq.length)
+        .sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          if (b.entry.points !== a.entry.points)
+            return b.entry.points - a.entry.points;
+          return b.entry.goalDifference - a.entry.goalDifference;
+        })
+        .slice(0, 5),
+    [leagueTable]
+  );
+
+  const metrics: Array<{
+    title: string;
+    headline: string;
+    body: string;
+    footer?: ReactNode;
+  }> = [];
+
+  const crestLookup = useMemo(() => {
+    const map = new Map<string, { crest?: string; position: number; points: number; goalDifference: number }>();
+    leagueTable.forEach((entry) => {
+      map.set(entry.team, {
+        crest: entry.crest,
+        position: entry.position,
+        points: entry.points,
+        goalDifference: entry.goalDifference,
+      });
+    });
+    return map;
+  }, [leagueTable]);
+
+  if (leader && challenger) {
+    const gap = leader.points - challenger.points;
+    const gapLabel =
+      gap === 0
+        ? "Level on points"
+        : `${Math.abs(gap)} ${Math.abs(gap) === 1 ? "point" : "points"} clear`;
+    metrics.push({
+      title: "Title Race",
+      headline: `${leader.team} vs ${challenger.team}`,
+      body: `${leader.points} pts · ${challenger.points} pts`,
+      footer: (
+        <span className="text-xs uppercase tracking-wide text-slate-400">
+          {gapLabel}
+        </span>
+      ),
+    });
+  }
+
+  if (inFormClub) {
+    const crestInfo = crestLookup.get(inFormClub.entry.team);
+    const crest = crestInfo?.crest;
+    metrics.push({
+      title: "Form Club",
+      headline: inFormClub.entry.team,
+      body: `${inFormClub.score} pts from the last five`,
+      footer: (
+        <div className="flex items-center gap-3 text-slate-200">
+          {crest && (
+            <img
+              src={crest}
+              alt={`${inFormClub.entry.team} crest`}
+              className="h-10 w-10 rounded-full border border-slate-700/70 bg-slate-900/60 p-2"
+            />
+          )}
+          <div className="space-y-1 text-xs text-slate-400">
+            <p>
+              Pos {crestInfo?.position ?? inFormClub.entry.position} ·{" "}
+              {crestInfo?.points ?? inFormClub.entry.points} pts
             </p>
+            <p>GD {crestInfo?.goalDifference ?? inFormClub.entry.goalDifference}</p>
+            <FormBadges
+              form={inFormClub.entry.form}
+              fallback={inFormClub.formSeq}
+              label={false}
+              className="text-slate-200"
+            />
+          </div>
+        </div>
+      ),
+    });
+  }
+
+  if (topScorer) {
+    metrics.push({
+      title: "Golden Boot",
+      headline: topScorer.player,
+      body: `${topScorer.goals} goals · ${topScorer.assists} assists`,
+      footer: (
+        <span className="text-xs uppercase tracking-wide text-slate-400">
+          {topScorer.team}
+        </span>
+      ),
+    });
+  }
+
+  const topAttack = topAttackingClubs[0];
+  if (metrics.length < 3 && topAttack) {
+    metrics.push({
+      title: "Top Attack",
+      headline: topAttack.team,
+      body: `${topAttack.goalsFor} goals scored`,
+      footer: (
+        <span className="text-xs uppercase tracking-wide text-slate-400">
+          {topAttack.points} pts in the standings
+        </span>
+      ),
+    });
+  }
+
+  while (metrics.length < 3) {
+    metrics.push({
+      title: "Premier League Live",
+      headline: "Data syncing",
+      body: "Standings, scorers and fixtures refresh automatically.",
+    });
+  }
+
+  const heroHomeCrest = headlineMatch ? crestLookup.get(headlineMatch.homeTeam)?.crest : undefined;
+  const heroAwayCrest = headlineMatch ? crestLookup.get(headlineMatch.awayTeam)?.crest : undefined;
+  const upcomingHomeInfo =
+    heroIsUpcoming && headlineMatch ? crestLookup.get(headlineMatch.homeTeam) : undefined;
+  const upcomingAwayInfo =
+    heroIsUpcoming && headlineMatch ? crestLookup.get(headlineMatch.awayTeam) : undefined;
+
+  const heroBulletPoints = [
+    leader
+      ? `${leader.team} lead the league on ${leader.points} points.`
+      : null,
+    inFormClub
+      ? `${inFormClub.entry.team} have taken ${inFormClub.score} of the last 15 available points.`
+      : null,
+    topScorer
+      ? `${topScorer.player} tops the Golden Boot on ${topScorer.goals} goals.`
+      : null,
+  ].filter(Boolean) as string[];
+
+  const homeScoreDisplay =
+    headlineMatch && heroHasScore
+      ? String(headlineMatch.homeScore)
+      : heroIsUpcoming
+        ? "KO"
+        : "—";
+  const awayScoreDisplay =
+    headlineMatch && heroHasScore
+      ? String(headlineMatch.awayScore)
+      : heroIsUpcoming
+        ? "KO"
+        : "—";
+  const centreScoreLabel = heroHasScore ? "—" : "vs";
+
+  const formatStatus = (status: MatchSummary["status"]) => {
+    switch (status) {
+      case "FINISHED":
+        return "Full time";
+      case "IN_PLAY":
+        return "In play";
+      case "PAUSED":
+        return "Half-time";
+      case "SCHEDULED":
+      case "TIMED":
+        return "Upcoming";
+      case "POSTPONED":
+        return "Postponed";
+      case "SUSPENDED":
+        return "Suspended";
+      case "CANCELED":
+        return "Canceled";
+      default:
+        {
+          const label = status.replace(/_/g, " ").toLowerCase();
+          return label.charAt(0).toUpperCase() + label.slice(1);
+        }
+    }
+  };
+
+  if (loading) {
+    return (
+      <section className="glass-card p-8 text-center text-slate-300">
+        <p className="text-sm uppercase tracking-[0.35em] text-slate-500">
+          Fetching live data
+        </p>
+        <p className="mt-3 text-lg text-white">
+          Loading Premier League standings and leaders…
+        </p>
+      </section>
+    );
+  }
+
+  if (error) {
+    return (
+      <section className="glass-card space-y-3 p-8 text-center text-slate-300">
+        <p className="text-lg font-semibold text-red-300">
+          We couldn&apos;t load the live data.
+        </p>
+        <p className="text-sm text-slate-400">
+          {error}. Try refreshing the page or checking your API token
+          configuration.
+        </p>
+      </section>
+    );
+  }
+
+  return (
+    <div className="space-y-12">
+      <section className="hero-panel glass-card p-8">
+        <div className="hero-layout gap-8 lg:grid lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+          <div className="hero-scorecard space-y-6">
+            <span className="stat-badge">
+              {headlineMatch ? formatStatus(headlineMatch.status) : "Live centre"}
+            </span>
+            <div className="hero-scoregrid">
+              <div className="hero-team">
+                <div className="hero-team-details">
+                  {heroHomeCrest && (
+                    <img
+                      src={heroHomeCrest}
+                      alt={`${headlineMatch?.homeTeam} crest`}
+                      className="hero-team-badge"
+                    />
+                  )}
+                  <p className="hero-team-name text-white">
+                    {headlineMatch ? headlineMatch.homeTeam : "Premier League"}
+                  </p>
+                </div>
+                <p className="hero-team-score text-brand">{homeScoreDisplay}</p>
+              </div>
+              <div className="hero-score-divider text-slate-400">
+                {headlineMatch ? centreScoreLabel : ""}
+              </div>
+              <div className="hero-team">
+                <div className="hero-team-details">
+                  {heroAwayCrest && (
+                    <img
+                      src={heroAwayCrest}
+                      alt={`${headlineMatch?.awayTeam} crest`}
+                      className="hero-team-badge"
+                    />
+                  )}
+                  <p className="hero-team-name text-white">
+                    {headlineMatch ? headlineMatch.awayTeam : "Live Centre"}
+                  </p>
+                </div>
+                <p className="hero-team-score text-brand">{awayScoreDisplay}</p>
+              </div>
+            </div>
+            {headlineMatch ? (
+              <>
+                <p className="hero-meta-line text-slate-300">
+                  {headlineMatch.competition}
+                </p>
+                <p className="hero-meta-line text-slate-500">
+                  {headlineMatch.date}
+                </p>
+              </>
+            ) : (
+              <p className="hero-meta-line text-slate-300">
+                Live standings, scorers and fixtures refreshed in real time.
+              </p>
+            )}
+          </div>
+          <div className="hero-body space-y-6">
+            <p className="text-lg text-slate-200">{heroNarrative}</p>
+            {heroBulletPoints.length > 0 && (
+              <ul className="hero-highlights space-y-2 text-sm text-slate-400">
+                {heroBulletPoints.map((point) => (
+                  <li key={point} className="flex items-start gap-2">
+                    <span className="mt-1 h-2 w-2 rounded-full bg-brand/70" />
+                    <span>{point}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
             <div className="flex flex-wrap gap-3">
               <button
                 type="button"
@@ -227,43 +656,31 @@ const HomePage = ({ onNavigate }: HomePageProps) => {
               </button>
             </div>
           </div>
-          <div className="gradient-border">
-            <div className="gradient-inner space-y-6">
-              <h3 className="text-xl font-semibold text-slate-100">
-                Latest score centre
-              </h3>
-              <ul className="space-y-4">
-                {recentHighlights.map((match) => (
-                  <li
-                    key={match.id}
-                    className="rounded-lg border border-slate-800/80 bg-slate-900/40 p-4"
-                  >
-                    <div className="flex items-center justify-between text-sm text-slate-400">
-                      <span>{match.date}</span>
-                      <span>{match.competition}</span>
-                    </div>
-                    <p className="mt-3 text-lg font-semibold text-slate-100">
-                      {match.homeTeam}{" "}
-                      <span className="text-brand">{match.homeScore}</span>
-                      <span className="mx-2 text-slate-500">—</span>
-                      <span className="text-brand">{match.awayScore}</span>{" "}
-                      {match.awayTeam}
-                    </p>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </div>
         </div>
       </section>
 
-      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]">
+      <section className="grid gap-4 md:grid-cols-3">
+        {metrics.map((metric) => (
+          <article key={metric.title} className="glass-card metric-card p-6">
+            <p className="metric-title text-xs uppercase tracking-[0.35em] text-slate-500">
+              {metric.title}
+            </p>
+            <h3 className="metric-headline text-2xl font-semibold text-white">
+              {metric.headline}
+            </h3>
+            <p className="metric-body text-sm text-slate-300">{metric.body}</p>
+            {metric.footer && <div className="mt-3">{metric.footer}</div>}
+          </article>
+        ))}
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)]">
         <div className="glass-card p-6">
           <div className="flex items-center justify-between">
             <h3 className="text-xl font-semibold text-slate-100">
-              Top of the league
+              Premier League Table
             </h3>
-            <span className="text-sm text-slate-400">Matchday 9 snapshot</span>
+            <span className="text-sm text-slate-400">Live standings</span>
           </div>
           <div className="mt-5 overflow-hidden rounded-xl border border-slate-800/70">
             <table className="min-w-full text-left text-sm">
@@ -280,22 +697,39 @@ const HomePage = ({ onNavigate }: HomePageProps) => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/70 text-slate-200">
-                {topFive.map((entry) => (
+                {leagueTable.map((entry) => (
                   <tr key={entry.teamId} className="table-row">
                     <td className="px-4 py-3 text-sm font-semibold text-slate-400">
                       {entry.position}
                     </td>
                     <td className="px-4 py-3">
-                      <button
-                        type="button"
-                        onClick={() => onNavigate(`#/team/${entry.teamId}`)}
-                        className="text-left font-semibold text-slate-100 transition hover:text-brand"
-                      >
-                        {entry.team}
-                      </button>
-                      <p className="text-xs text-slate-500">
-                        Form: {entry.form}
-                      </p>
+                      <div className="flex items-center gap-3">
+                        {entry.crest && (
+                          <img
+                            src={entry.crest}
+                            alt={`${entry.team} crest`}
+                            className="h-8 w-8 rounded-full border border-slate-700/70 bg-slate-900/60 p-1"
+                          />
+                        )}
+                        <div>
+                          <button
+                            type="button"
+                            onClick={() => onNavigate(`#/team/${entry.teamId}`)}
+                            className="text-left font-semibold text-slate-100 transition hover:text-brand"
+                          >
+                            {entry.team}
+                          </button>
+                          <FormBadges
+                            form={entry.form}
+                            fallback={
+                              entry.form
+                                ? entry.form.split(/[, ]+/).filter((value) => value.length)
+                                : undefined
+                            }
+                            label={false}
+                          />
+                        </div>
+                      </div>
                     </td>
                     <td className="px-4 py-3">{entry.played}</td>
                     <td className="px-4 py-3">{entry.won}</td>
@@ -307,33 +741,216 @@ const HomePage = ({ onNavigate }: HomePageProps) => {
                     </td>
                   </tr>
                 ))}
+                {!leagueTable.length && (
+                  <tr>
+                    <td
+                      colSpan={8}
+                      className="px-4 py-6 text-center text-sm text-slate-400"
+                    >
+                      Live standings are unavailable right now. Try again
+                      shortly.
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
 
-        <div className="flex flex-col gap-6">
-          <LeaderboardCard
-            title="Goal contribution leaders"
-            subtitle="Combined goals and assists"
-            metric="contributions"
-            leaders={contributionLeaders}
-          />
-          <div className="grid gap-6 sm:grid-cols-2 xl:grid-cols-1">
-            <LeaderboardCard
-              title="Golden Boot race"
-              subtitle="Most goals"
-              metric="goals"
-              leaders={goalLeaders}
-            />
-            <LeaderboardCard
-              title="Assist providers"
-              subtitle="Most assists"
-              metric="assists"
-              leaders={assistLeaders}
-            />
+        <div className="grid gap-6">
+          <div className="glass-card p-6">
+            <h3 className="text-xl font-semibold text-slate-100">
+              Latest results
+            </h3>
+            <ul className="mt-4 space-y-3">
+              {latestFive.length ? (
+                latestFive.map((match) => {
+                  const homeCrest = crestLookup.get(match.homeTeam)?.crest;
+                  const awayCrest = crestLookup.get(match.awayTeam)?.crest;
+                  return (
+                  <li
+                    key={match.id}
+                    className="rounded-xl border border-slate-800/70 bg-slate-900/40 px-4 py-3 text-sm"
+                  >
+                    <div className="flex items-center justify-between gap-4 text-slate-300">
+                      <div className="flex flex-col gap-2">
+                        <p className="text-xs uppercase tracking-wide text-slate-500">
+                          {match.competition}
+                        </p>
+                        <div className="flex items-center gap-3">
+                          {homeCrest && (
+                            <img
+                              src={homeCrest}
+                              alt={`${match.homeTeam} crest`}
+                              className="result-team-badge"
+                            />
+                          )}
+                          <span className="font-semibold text-white">
+                            {match.homeTeam}
+                          </span>
+                          <span className="text-brand">
+                            {match.homeScore ?? "—"}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          {awayCrest && (
+                            <img
+                              src={awayCrest}
+                              alt={`${match.awayTeam} crest`}
+                              className="result-team-badge"
+                            />
+                          )}
+                          <span className="font-semibold text-white">
+                            {match.awayTeam}
+                          </span>
+                          <span className="text-brand">
+                            {match.awayScore ?? "—"}
+                          </span>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <span className="text-xs uppercase tracking-wide text-brand">
+                          {formatStatus(match.status)}
+                        </span>
+                        <p className="mt-1 text-xs text-slate-500">
+                          {match.date}
+                        </p>
+                      </div>
+                    </div>
+                  </li>
+                );
+                })
+              ) : (
+                <li className="rounded-xl border border-dashed border-slate-800/80 bg-slate-900/30 p-4 text-center text-sm text-slate-400">
+                  Recent match data is unavailable right now.
+                </li>
+              )}
+            </ul>
           </div>
+
+          {heroIsUpcoming && headlineMatch && (
+            <div className="glass-card p-6">
+              <h3 className="text-xl font-semibold text-slate-100">
+                Next kickoff
+              </h3>
+              <div className="mt-4 space-y-3 text-sm text-slate-300">
+                <div className="kickoff-matchup">
+                  <div className="kickoff-team">
+                    {upcomingHomeInfo?.crest && (
+                      <img
+                        src={upcomingHomeInfo.crest}
+                        alt={`${headlineMatch.homeTeam} crest`}
+                        className="kickoff-team-badge"
+                      />
+                    )}
+                    <span className="font-semibold text-white">
+                      {headlineMatch.homeTeam}
+                    </span>
+                  </div>
+                  <span className="kickoff-divider">vs</span>
+                  <div className="kickoff-team">
+                    {upcomingAwayInfo?.crest && (
+                      <img
+                        src={upcomingAwayInfo.crest}
+                        alt={`${headlineMatch.awayTeam} crest`}
+                        className="kickoff-team-badge"
+                      />
+                    )}
+                    <span className="font-semibold text-white">
+                      {headlineMatch.awayTeam}
+                    </span>
+                  </div>
+                </div>
+                <p className="text-sm text-slate-300">
+                  {headlineMatch.competition}
+                </p>
+                <p className="text-xs uppercase tracking-wide text-slate-500">
+                  {headlineMatch.date}
+                </p>
+              </div>
+            </div>
+          )}
         </div>
+      </section>
+
+      <section className="grid gap-6 lg:grid-cols-3">
+        <div className="glass-card p-6">
+          <h3 className="text-xl font-semibold text-slate-100">Top attacks</h3>
+          <ul className="mt-4 space-y-3 text-sm text-slate-300">
+            {topAttackingClubs.map((club) => (
+              <li
+                key={`attack-${club.teamId}`}
+                className="flex items-center justify-between rounded-lg border border-slate-800/70 bg-slate-900/40 px-4 py-3"
+              >
+                <span className="font-semibold text-white">{club.team}</span>
+                <span className="text-brand">{club.goalsFor} goals</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="glass-card p-6">
+          <h3 className="text-xl font-semibold text-slate-100">
+            Tightest defences
+          </h3>
+          <ul className="mt-4 space-y-3 text-sm text-slate-300">
+            {bestDefensiveClubs.map((club) => (
+              <li
+                key={`defence-${club.teamId}`}
+                className="flex items-center justify-between rounded-lg border border-slate-800/70 bg-slate-900/40 px-4 py-3"
+              >
+                <span className="font-semibold text-white">{club.team}</span>
+                <span className="text-accent">{club.goalsAgainst} conceded</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div className="glass-card p-6">
+          <h3 className="text-xl font-semibold text-slate-100">Form tracker</h3>
+          <ul className="mt-4 space-y-3 text-sm text-slate-300">
+            {formLeaderboard.map((item) => (
+              <li
+                key={`form-${item.entry.teamId}`}
+                className="flex items-center justify-between rounded-lg border border-slate-800/70 bg-slate-900/40 px-4 py-3"
+              >
+                <div>
+                  <p className="font-semibold text-white">{item.entry.team}</p>
+                  <FormBadges
+                    form={item.entry.form}
+                    fallback={item.seq}
+                    label={false}
+                  />
+                </div>
+                <span className="text-brand">{item.score} pts</span>
+              </li>
+            ))}
+            {!formLeaderboard.length && (
+              <li className="rounded-lg border border-dashed border-slate-800/70 bg-slate-900/30 p-4 text-center text-sm text-slate-400">
+                Form data is syncing. Check back shortly.
+              </li>
+            )}
+          </ul>
+        </div>
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-3">
+        <LeaderboardCard
+          title="Goal contribution leaders"
+          subtitle="Combined goals and assists"
+          metric="contributions"
+          leaders={contributionLeaders}
+        />
+        <LeaderboardCard
+          title="Golden Boot race"
+          subtitle="Most goals"
+          metric="goals"
+          leaders={goalLeaders}
+        />
+        <LeaderboardCard
+          title="Assist providers"
+          subtitle="Most assists"
+          metric="assists"
+          leaders={assistLeaders}
+        />
       </section>
     </div>
   );
@@ -341,79 +958,159 @@ const HomePage = ({ onNavigate }: HomePageProps) => {
 
 type TeamsPageProps = {
   onNavigate: (path: string) => void;
+  teams: TeamSummary[];
+  loading: boolean;
+  error?: string | null;
 };
 
-const TeamsPage = ({ onNavigate }: TeamsPageProps) => (
-  <div className="space-y-6">
-    <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-      <div>
-        <h2 className="page-title text-3xl font-semibold text-white">
-          Premier League clubs
-        </h2>
-        <p className="text-slate-300">
-          Tap a crest to open the club hub with fixtures, form and star players.
-        </p>
-      </div>
-      <button
-        type="button"
-        onClick={() => onNavigate("#/")}
-        className="rounded-full border border-slate-600 px-5 py-2 text-sm font-semibold text-slate-200 transition hover:border-brand/50 hover:text-brand"
-      >
-        Back to home
-      </button>
-    </div>
+const TeamsPage = ({ onNavigate, teams, loading, error }: TeamsPageProps) => {
+  const orderedTeams = useMemo(() => {
+    return [...teams].sort((a, b) => {
+      const pointsA = typeof a.points === "number" ? a.points : -Infinity;
+      const pointsB = typeof b.points === "number" ? b.points : -Infinity;
+      if (pointsB !== pointsA) {
+        return pointsB - pointsA;
+      }
 
-    <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
-      {teams.map((team) => (
-        <article key={team.id} className="team-card">
-          <div className="flex items-center gap-4">
-            <img
-              src={team.logo}
-              alt={`${team.name} crest`}
-              className="h-16 w-16 rounded-full border border-slate-700/70 bg-slate-900/60 p-2"
-            />
-            <div>
-              <h3 className="text-lg font-semibold text-white">{team.name}</h3>
-              <p className="text-sm text-slate-400">Founded {team.founded}</p>
-            </div>
-          </div>
-          <p className="text-sm leading-relaxed text-slate-300">
-            {team.description}
+      const gdA = typeof a.goalDifference === "number" ? a.goalDifference : -Infinity;
+      const gdB = typeof b.goalDifference === "number" ? b.goalDifference : -Infinity;
+      if (gdB !== gdA) {
+        return gdB - gdA;
+      }
+
+      return a.name.localeCompare(b.name);
+    });
+  }, [teams]);
+
+  if (loading) {
+    return (
+      <section className="glass-card p-8 text-center text-slate-300">
+        <p className="text-sm uppercase tracking-[0.35em] text-slate-500">
+          Synchronising clubs
+        </p>
+        <p className="mt-3 text-lg text-white">
+          Fetching Premier League club profiles…
+        </p>
+      </section>
+    );
+  }
+
+  if (error) {
+    return (
+      <section className="glass-card space-y-3 p-8 text-center text-slate-300">
+        <p className="text-lg font-semibold text-red-300">
+          Unable to load clubs right now.
+        </p>
+        <p className="text-sm text-slate-400">{error}</p>
+      </section>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+        <div>
+          <h2 className="page-title text-3xl font-semibold text-white">
+            Premier League clubs
+          </h2>
+          <p className="text-slate-300">
+            Tap a crest to open the club hub with fixtures, form and squad
+            lists.
           </p>
-          <div className="flex flex-wrap gap-2 text-xs text-slate-400">
-            {team.strengths.map((strength) => (
-              <span
-                key={strength}
-                className="rounded-full bg-slate-900/60 px-3 py-1"
+        </div>
+        <button
+          type="button"
+          onClick={() => onNavigate("#/")}
+          className="rounded-full border border-slate-600 px-5 py-2 text-sm font-semibold text-slate-200 transition hover:border-brand/50 hover:text-brand"
+        >
+          Back to home
+        </button>
+      </div>
+
+      <div className="grid gap-6 md:grid-cols-2 xl:grid-cols-3">
+        {orderedTeams.map((team) => {
+          const hasPoints = typeof team.points === "number";
+          const hasGoalDiff = typeof team.goalDifference === "number";
+          const goalDifferenceValue = hasGoalDiff
+            ? Number(team.goalDifference)
+            : null;
+          const formattedGoalDiff = goalDifferenceValue !== null
+            ? `${goalDifferenceValue > 0 ? "+" : ""}${goalDifferenceValue}`
+            : null;
+          return (
+            <article key={team.id} className="team-card">
+              <div className="flex items-center gap-4">
+                <img
+                  src={team.crest}
+                  alt={`${team.name} crest`}
+                  className="h-16 w-16 rounded-full border border-slate-700/70 bg-slate-900/60 p-2"
+                />
+                <div className="space-y-1">
+                  <h3 className="text-lg font-semibold text-white">
+                    {team.name}
+                  </h3>
+                  {team.founded && (
+                    <p className="text-xs uppercase tracking-wide text-slate-500">
+                      Founded {team.founded}
+                    </p>
+                  )}
+                  {team.venue && (
+                    <p className="text-sm text-slate-400">{team.venue}</p>
+                  )}
+                </div>
+              </div>
+              <div className="mt-4 flex flex-wrap gap-2 text-xs text-slate-400">
+                {team.coach && (
+                  <span className="rounded-full bg-slate-900/60 px-3 py-1">
+                    Coach: {team.coach}
+                  </span>
+                )}
+              </div>
+              {(hasPoints || hasGoalDiff) && (
+                <div className="flex items-center justify-between text-sm text-slate-300">
+                  <span className="rounded-full bg-brand/15 px-3 py-1 font-semibold text-brand">
+                    {hasPoints ? `${team.points} pts` : "Pts --"}{" "}
+                    {formattedGoalDiff ? `· GD ${formattedGoalDiff}` : ""}
+                  </span>
+                  {team.clubColors && (
+                    <span className="text-xs uppercase tracking-wide text-slate-500">
+                      {team.clubColors}
+                    </span>
+                  )}
+                </div>
+              )}
+              <div className="flex items-center justify-between text-sm text-slate-300">
+                <FormBadges form={team.form} size="md" />
+                {!(hasPoints || hasGoalDiff) && team.clubColors && (
+                  <span className="text-xs uppercase tracking-wide text-slate-500">
+                    {team.clubColors}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => onNavigate(`#/team/${team.id}`)}
+                className="rounded-full bg-accent/20 px-4 py-2 text-sm font-semibold text-accent transition hover:bg-accent/30"
               >
-                {strength}
-              </span>
-            ))}
+                View club hub
+              </button>
+            </article>
+          );
+        })}
+        {!orderedTeams.length && (
+          <div className="glass-card p-6 text-center text-slate-300">
+            <p>No clubs to display at the moment. Refresh to try again.</p>
           </div>
-          <div className="flex items-center justify-between text-sm text-slate-300">
-            <span>
-              Form:{" "}
-              <span className="font-semibold text-brand">
-                {team.lastFive.join(" ")}
-              </span>
-            </span>
-            <span>{team.stadium}</span>
-          </div>
-          <button
-            type="button"
-            onClick={() => onNavigate(`#/team/${team.id}`)}
-            className="rounded-full bg-accent/20 px-4 py-2 text-sm font-semibold text-accent transition hover:bg-accent/30"
-          >
-            View club hub
-          </button>
-        </article>
-      ))}
+        )}
+      </div>
     </div>
-  </div>
-);
+  );
+};
 
 type TeamPageProps = {
-  team?: Team;
+  team?: TeamDetail;
+  loading: boolean;
+  error?: string | null;
   onNavigate: (path: string) => void;
 };
 
@@ -432,7 +1129,43 @@ const OutcomeBadge = ({ outcome }: { outcome: "W" | "D" | "L" }) => {
   );
 };
 
-const TeamDetailsPage = ({ team, onNavigate }: TeamPageProps) => {
+const TeamDetailsPage = ({
+  team,
+  loading,
+  error,
+  onNavigate,
+}: TeamPageProps) => {
+  if (loading) {
+    return (
+      <section className="glass-card p-8 text-center text-slate-300">
+        <p className="text-sm uppercase tracking-[0.35em] text-slate-500">
+          Building club hub
+        </p>
+        <p className="mt-3 text-lg text-white">
+          Loading fixtures, results and squad details…
+        </p>
+      </section>
+    );
+  }
+
+  if (error) {
+    return (
+      <section className="glass-card space-y-3 p-8 text-center text-slate-300">
+        <p className="text-lg font-semibold text-red-300">
+          We couldn&apos;t load that club.
+        </p>
+        <p className="text-sm text-slate-400">{error}</p>
+        <button
+          type="button"
+          onClick={() => onNavigate("#/teams")}
+          className="mx-auto mt-2 inline-flex items-center justify-center rounded-full border border-slate-600 px-5 py-2 text-sm font-semibold text-slate-200 transition hover:border-brand/50 hover:text-brand"
+        >
+          Back to teams
+        </button>
+      </section>
+    );
+  }
+
   if (!team) {
     return (
       <div className="glass-card p-8 text-center">
@@ -440,8 +1173,8 @@ const TeamDetailsPage = ({ team, onNavigate }: TeamPageProps) => {
           Team not found
         </h2>
         <p className="mt-3 text-slate-300">
-          We couldn&apos;t locate that club in our data set. Try heading back to
-          the teams overview.
+          We couldn&apos;t locate that club in the live dataset. Try heading
+          back to the teams overview.
         </p>
         <button
           type="button"
@@ -454,6 +1187,8 @@ const TeamDetailsPage = ({ team, onNavigate }: TeamPageProps) => {
     );
   }
 
+  const stats = team.stats;
+
   return (
     <div className="space-y-8">
       <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
@@ -465,14 +1200,14 @@ const TeamDetailsPage = ({ team, onNavigate }: TeamPageProps) => {
           ← All clubs
         </button>
         <div className="text-right text-sm text-slate-400 md:text-left">
-          <p>Last updated: Matchday 9 snapshot</p>
+          <p>Live snapshot from football-data.org</p>
         </div>
       </div>
 
       <section className="gradient-border">
         <div className="gradient-inner grid gap-6 md:grid-cols-[auto_minmax(0,1fr)]">
           <img
-            src={team.logo}
+            src={team.crest}
             alt={`${team.name} crest`}
             className="mx-auto h-28 w-28 rounded-full border border-brand/40 bg-slate-900/70 p-4"
           />
@@ -483,16 +1218,25 @@ const TeamDetailsPage = ({ team, onNavigate }: TeamPageProps) => {
                   {team.name}
                 </h2>
                 <p className="text-sm uppercase tracking-[0.35em] text-slate-500">
-                  {team.stadium}
+                  {team.venue}
                 </p>
               </div>
               <div className="flex flex-wrap gap-2 text-xs text-slate-300 md:justify-end">
-                <span className="rounded-full bg-brand/20 px-3 py-1 text-brand">
-                  Coach: {team.coach}
-                </span>
-                <span className="rounded-full bg-slate-900/60 px-3 py-1">
-                  Founded {team.founded}
-                </span>
+                {team.coach && (
+                  <span className="rounded-full bg-brand/20 px-3 py-1 text-brand">
+                    Coach: {team.coach}
+                  </span>
+                )}
+                {team.founded && (
+                  <span className="rounded-full bg-slate-900/60 px-3 py-1">
+                    Founded {team.founded}
+                  </span>
+                )}
+                {team.clubColors && (
+                  <span className="rounded-full bg-slate-900/60 px-3 py-1">
+                    Colours: {team.clubColors}
+                  </span>
+                )}
               </div>
             </div>
             <p className="text-slate-200">{team.description}</p>
@@ -507,20 +1251,23 @@ const TeamDetailsPage = ({ team, onNavigate }: TeamPageProps) => {
               ))}
             </div>
             <div className="flex flex-wrap items-center gap-3 text-sm text-slate-300">
-              <span className="stat-badge">
-                Form: {team.lastFive.join(" ")}
-              </span>
-              <span className="rounded-full bg-accent/20 px-3 py-1 text-accent">
-                W {team.stats.wins} · D {team.stats.draws} · L{" "}
-                {team.stats.losses}
-              </span>
-              <span className="rounded-full bg-slate-900/60 px-3 py-1">
-                Goals: {team.stats.goalsFor} for / {team.stats.goalsAgainst}{" "}
-                against
-              </span>
-              <span className="rounded-full bg-brand/20 px-3 py-1 text-brand">
-                Clean sheets: {team.stats.cleanSheets}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className="stat-badge">Recent form</span>
+                <FormBadges form={team.form} fallback={team.lastFive} size="md" label={false} />
+              </div>
+              {stats && (
+                <>
+                  <span className="rounded-full bg-accent/20 px-3 py-1 text-accent">
+                    W {stats.wins} · D {stats.draws} · L {stats.losses}
+                  </span>
+                  <span className="rounded-full bg-slate-900/60 px-3 py-1">
+                    Goals: {stats.goalsFor} for / {stats.goalsAgainst} against
+                  </span>
+                  <span className="rounded-full bg-brand/20 px-3 py-1 text-brand">
+                    {stats.points} points
+                  </span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -548,6 +1295,11 @@ const TeamDetailsPage = ({ team, onNavigate }: TeamPageProps) => {
                 </div>
               </li>
             ))}
+            {!team.upcomingFixtures.length && (
+              <li className="rounded-xl border border-slate-800/70 bg-slate-900/40 p-4 text-sm text-slate-400">
+                No scheduled fixtures found.
+              </li>
+            )}
           </ul>
         </div>
 
@@ -570,19 +1322,24 @@ const TeamDetailsPage = ({ team, onNavigate }: TeamPageProps) => {
                 <OutcomeBadge outcome={result.outcome} />
               </li>
             ))}
+            {!team.recentResults.length && (
+              <li className="rounded-xl border border-slate-800/70 bg-slate-900/40 p-4 text-sm text-slate-400">
+                Recent results not available.
+              </li>
+            )}
           </ul>
         </div>
       </section>
 
       <section className="glass-card p-6">
         <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
-          <h3 className="text-xl font-semibold text-white">Key players</h3>
+          <h3 className="text-xl font-semibold text-white">Squad list</h3>
           <span className="text-sm text-slate-400">
-            Goal contributions this season
+            Data provided by football-data.org
           </span>
         </div>
         <div className="mt-4 divide-y divide-slate-800/60">
-          {team.players.map((player) => (
+          {team.squad.map((player) => (
             <div
               key={player.id}
               className="flex flex-col gap-3 py-3 md:flex-row md:items-center md:justify-between"
@@ -593,16 +1350,23 @@ const TeamDetailsPage = ({ team, onNavigate }: TeamPageProps) => {
                   {player.position}
                 </p>
               </div>
-              <div className="flex gap-6 text-sm text-slate-300">
-                <span className="rounded-full bg-brand/15 px-3 py-1 text-brand">
-                  {player.goals} goals
-                </span>
-                <span className="rounded-full bg-accent/15 px-3 py-1 text-accent">
-                  {player.assists} assists
+              <div className="flex gap-4 text-sm text-slate-300">
+                {player.shirtNumber && (
+                  <span className="rounded-full bg-brand/15 px-3 py-1 text-brand">
+                    #{player.shirtNumber}
+                  </span>
+                )}
+                <span className="rounded-full bg-slate-900/60 px-3 py-1">
+                  {player.nationality}
                 </span>
               </div>
             </div>
           ))}
+          {!team.squad.length && (
+            <p className="py-4 text-sm text-slate-400">
+              Squad information not yet available.
+            </p>
+          )}
         </div>
       </section>
     </div>
@@ -784,10 +1548,13 @@ const AboutPage = () => (
       CDN), TypeScript and Vite to provide a modern matchday experience.
     </p>
     <p className="text-slate-300">
-      Data is mocked to showcase the layout, but the architecture is ready for
-      live integrations using the football-data.org API and an{" "}
-      <code className="rounded bg-slate-900 px-1.5 py-0.5">X-Auth-Token</code>
-      header.
+      Live tables, scorers and club hubs are powered by the football-data.org
+      API using the
+      <code className="mx-1 rounded bg-slate-900 px-1.5 py-0.5">
+        X-Auth-Token
+      </code>{" "}
+      header. Mocked analytics blocks remain to showcase richer visualisations
+      until the live endpoints expose similar stats.
     </p>
     <div className="flex flex-wrap gap-3 text-sm text-slate-300">
       <span className="rounded-full bg-brand/20 px-3 py-1 text-brand">
@@ -811,7 +1578,9 @@ const AboutPage = () => (
 
 const Footer = () => (
   <footer className="mt-16 flex flex-col items-center gap-3 text-xs text-slate-500 md:flex-row md:justify-between">
-    <p>Premier League Live Dashboard · Mock data refreshed Oct 2024</p>
+    <p>
+      Premier League Live Dashboard · Live data courtesy of football-data.org
+    </p>
     <p>
       Built with ⚽ by{" "}
       <a
@@ -828,6 +1597,18 @@ const App = () => {
   const [route, setRoute] = useState<Route>(() =>
     parseHash(window.location.hash)
   );
+  const [standings, setStandings] = useState<LeagueStanding[]>([]);
+  const [scorers, setScorers] = useState<TopScorer[]>([]);
+  const [latestMatches, setLatestMatches] = useState<MatchSummary[]>([]);
+  const [featuredMatch, setFeaturedMatch] = useState<MatchSummary | null>(null);
+  const [teams, setTeams] = useState<TeamSummary[]>([]);
+  const [teamDetails, setTeamDetails] = useState<Record<string, TeamDetail>>(
+    {}
+  );
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [teamLoading, setTeamLoading] = useState(false);
+  const [teamError, setTeamError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!window.location.hash) {
@@ -839,6 +1620,83 @@ const App = () => {
     return () => window.removeEventListener("hashchange", handler);
   }, []);
 
+  useEffect(() => {
+    const load = async () => {
+      setLoading(true);
+      setError(null);
+      try {
+        const [table, scorersData, teamsData] = await Promise.all([
+          fetchPremierLeagueStandings(),
+          fetchPremierLeagueScorers(30),
+          fetchPremierLeagueTeams(),
+        ]);
+        setStandings(table);
+        setScorers(scorersData);
+        setTeams(enrichTeamsWithStandings(teamsData, table));
+
+        const [recentMatchesResult, upcomingMatchResult] = await Promise.allSettled([
+          fetchRecentPremierLeagueMatches(5),
+          fetchUpcomingPremierLeagueMatch(),
+        ]);
+
+        if (recentMatchesResult.status === "fulfilled") {
+          setLatestMatches(recentMatchesResult.value);
+        } else {
+          setLatestMatches([]);
+        }
+
+        const resolvedFeatured =
+          upcomingMatchResult.status === "fulfilled" && upcomingMatchResult.value
+            ? upcomingMatchResult.value
+            : recentMatchesResult.status === "fulfilled"
+              ? recentMatchesResult.value[0] ?? null
+              : null;
+        setFeaturedMatch(resolvedFeatured ?? null);
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : "Unexpected error fetching Premier League data";
+        setError(message);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    load();
+  }, []);
+
+  useEffect(() => {
+    if (route.page !== "team") {
+      setTeamError(null);
+      setTeamLoading(false);
+      return;
+    }
+
+    if (!route.teamId || !standings.length || teamDetails[route.teamId]) {
+      return;
+    }
+
+    const loadTeam = async () => {
+      setTeamLoading(true);
+      setTeamError(null);
+      try {
+        const detail = await fetchTeamDetail(route.teamId!, standings);
+        setTeamDetails((prev) => ({ ...prev, [route.teamId!]: detail }));
+      } catch (err) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : "Unexpected error fetching team details";
+        setTeamError(message);
+      } finally {
+        setTeamLoading(false);
+      }
+    };
+
+    void loadTeam();
+  }, [route, standings, teamDetails]);
+
   const onNavigate = (path: string) => {
     const target = path.startsWith("#") ? path.slice(1) : path;
     window.location.hash = target;
@@ -847,10 +1705,10 @@ const App = () => {
 
   const activeTeam = useMemo(() => {
     if (route.page === "team" && route.teamId) {
-      return teams.find((club) => club.id === route.teamId);
+      return teamDetails[route.teamId];
     }
     return undefined;
-  }, [route]);
+  }, [route, teamDetails]);
 
   return (
     <div className="app-shell space-y-10">
@@ -873,10 +1731,32 @@ const App = () => {
       </header>
 
       <main className="space-y-12">
-        {route.page === "home" && <HomePage onNavigate={onNavigate} />}
-        {route.page === "teams" && <TeamsPage onNavigate={onNavigate} />}
+        {route.page === "home" && (
+          <HomePage
+            onNavigate={onNavigate}
+            standings={standings}
+            scorers={scorers}
+            latestMatches={latestMatches}
+            featuredMatch={featuredMatch}
+            loading={loading}
+            error={error}
+          />
+        )}
+        {route.page === "teams" && (
+          <TeamsPage
+            onNavigate={onNavigate}
+            teams={teams}
+            loading={loading}
+            error={error}
+          />
+        )}
         {route.page === "team" && (
-          <TeamDetailsPage team={activeTeam} onNavigate={onNavigate} />
+          <TeamDetailsPage
+            team={activeTeam}
+            loading={teamLoading || loading}
+            error={teamError || error}
+            onNavigate={onNavigate}
+          />
         )}
         {route.page === "stats" && <StatsPage onNavigate={onNavigate} />}
         {route.page === "about" && <AboutPage />}

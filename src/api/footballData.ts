@@ -2,18 +2,33 @@ import type {
   Fixture,
   LeagueStanding,
   Player,
+  MatchSummary,
   Result,
   TeamDetail,
   TeamSummary,
   TopScorer,
 } from '../types/football'
 
-const API_BASE = 'https://api.football-data.org/v4'
-const API_TOKEN = '2ed0ce93529e40bf95624d05d9cf182d'
+const resolveBaseUrl = () => {
+  const configuredBase = import.meta.env.VITE_FOOTBALL_DATA_BASE
+  if (configuredBase && configuredBase.trim()) {
+    return configuredBase.replace(/\/$/, '')
+  }
+  return 'https://api.football-data.org/v4'
+}
 
-const withAuthHeaders = () => ({
-  'X-Auth-Token': API_TOKEN,
-})
+const API_BASE = resolveBaseUrl()
+const API_TOKEN = import.meta.env.VITE_FOOTBALL_DATA_TOKEN
+
+const withAuthHeaders = () => {
+  if (!API_TOKEN || !API_TOKEN.trim()) {
+    throw new Error('Missing API token. Set VITE_FOOTBALL_DATA_TOKEN in your environment configuration.')
+  }
+
+  return {
+    'X-Auth-Token': API_TOKEN,
+  }
+}
 
 const dateFormatter = new Intl.DateTimeFormat('en-GB', {
   weekday: 'short',
@@ -22,11 +37,42 @@ const dateFormatter = new Intl.DateTimeFormat('en-GB', {
   year: 'numeric',
 })
 
+const matchDateTimeFormatter = new Intl.DateTimeFormat('en-GB', {
+  weekday: 'short',
+  day: 'numeric',
+  month: 'short',
+  hour: '2-digit',
+  minute: '2-digit',
+})
+
 const toLocaleDate = (isoDate: string) => {
   try {
     return dateFormatter.format(new Date(isoDate))
   } catch (error) {
     return isoDate
+  }
+}
+
+const toMatchDateTime = (isoDate: string) => {
+  try {
+    const date = new Date(isoDate)
+    const parts = matchDateTimeFormatter.formatToParts(date)
+    const pick = (type: Intl.DateTimeFormatPartTypes) =>
+      parts.find((part) => part.type === type)?.value ?? ''
+    const weekday = pick('weekday')
+    const day = pick('day')
+    const month = pick('month')
+    const hour = pick('hour')
+    const minute = pick('minute')
+    const time = hour && minute ? `${hour}:${minute}` : ''
+    const segments = [
+      weekday ? weekday.replace(/,$/, '') : '',
+      [day, month].filter(Boolean).join(' '),
+      time,
+    ].filter(Boolean)
+    return segments.join(' · ')
+  } catch (error) {
+    return toLocaleDate(isoDate)
   }
 }
 
@@ -232,6 +278,33 @@ export const fetchTeamDetail = async (
   }
 }
 
+const mapMatchSummary = (match: any): MatchSummary => {
+  const safeScore = (score?: { home?: number | null; away?: number | null }) => ({
+    home: score?.home ?? null,
+    away: score?.away ?? null,
+  })
+
+  const fullTimeScore = safeScore(match.score?.fullTime)
+  const regularTimeScore = safeScore(match.score?.regularTime)
+  const penaltiesScore = safeScore(match.score?.penalties)
+
+  const resolvedHomeScore =
+    fullTimeScore.home ?? regularTimeScore.home ?? penaltiesScore.home ?? null
+  const resolvedAwayScore =
+    fullTimeScore.away ?? regularTimeScore.away ?? penaltiesScore.away ?? null
+
+  return {
+    id: String(match.id),
+    homeTeam: match.homeTeam?.name ?? 'TBD',
+    awayTeam: match.awayTeam?.name ?? 'TBD',
+    homeScore: resolvedHomeScore,
+    awayScore: resolvedAwayScore,
+    date: toMatchDateTime(match.utcDate),
+    competition: match.competition?.name ?? 'Premier League',
+    status: match.status ?? 'SCHEDULED',
+  }
+}
+
 export const enrichTeamsWithStandings = (
   teams: TeamSummary[],
   standings: LeagueStanding[],
@@ -245,3 +318,51 @@ export const enrichTeamsWithStandings = (
       goalDifference: row?.goalDifference,
     }
   })
+
+export const fetchRecentPremierLeagueMatches = async (
+  limit = 5,
+): Promise<MatchSummary[]> => {
+  const response = await fetch(`${API_BASE}/competitions/PL/matches?status=FINISHED&limit=${limit}`, {
+    headers: withAuthHeaders(),
+  })
+
+  if (!response.ok) {
+    throw new Error('Failed to load recent Premier League matches')
+  }
+
+  const data = await response.json()
+  const matches = (data.matches || []) as any[]
+
+  return matches
+    .slice()
+    .sort(
+      (a, b) => new Date(b.utcDate).getTime() - new Date(a.utcDate).getTime(),
+    )
+    .slice(0, limit)
+    .map(mapMatchSummary)
+}
+
+export const fetchUpcomingPremierLeagueMatch = async (): Promise<MatchSummary | null> => {
+  const response = await fetch(`${API_BASE}/competitions/PL/matches?status=SCHEDULED&limit=5`, {
+    headers: withAuthHeaders(),
+  })
+
+  if (!response.ok) {
+    throw new Error('Failed to load upcoming Premier League fixtures')
+  }
+
+  const data = await response.json()
+  const matches = (data.matches || []) as any[]
+
+  if (!matches.length) {
+    return null
+  }
+
+  const sorted = matches
+    .slice()
+    .sort(
+      (a, b) => new Date(a.utcDate).getTime() - new Date(b.utcDate).getTime(),
+    )
+
+  return sorted.length ? mapMatchSummary(sorted[0]) : null
+}

@@ -82,3 +82,14 @@ export type TopScorer = {
   goals: number
   assists: number
 }
+
+export type MatchSummary = {
+  id: string
+  homeTeam: string
+  awayTeam: string
+  homeScore: number | null
+  awayScore: number | null
+  date: string
+  competition: string
+  status: string
+}
