@@ -10,10 +10,23 @@ import type {
 } from '../types/football'
 
 const resolveBaseUrl = () => {
-  const configuredBase = import.meta.env.VITE_FOOTBALL_DATA_BASE
-  if (configuredBase && configuredBase.trim()) {
-    return configuredBase.replace(/\/$/, '')
+  const configuredBase = import.meta.env.VITE_FOOTBALL_DATA_BASE?.trim()
+  if (!configuredBase) {
+    return 'https://api.football-data.org/v4'
   }
+
+  const sanitizedBase = configuredBase.replace(/\/$/, '')
+  const isAbsoluteUrl = /^https?:\/\//i.test(sanitizedBase)
+
+  if (isAbsoluteUrl) {
+    return sanitizedBase
+  }
+
+  if (import.meta.env.DEV) {
+    // Only honor relative proxy paths when the Vite dev server can handle them.
+    return sanitizedBase.startsWith('/') ? sanitizedBase : `/${sanitizedBase}`
+  }
+
   return 'https://api.football-data.org/v4'
 }
 
