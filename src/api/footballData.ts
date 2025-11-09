@@ -11,8 +11,10 @@ import type {
 
 const resolveBaseUrl = () => {
   const configuredBase = import.meta.env.VITE_FOOTBALL_DATA_BASE?.trim()
+  const defaultBase = import.meta.env.DEV ? '/api' : '/.netlify/functions/football-data'
+
   if (!configuredBase) {
-    return 'https://api.football-data.org/v4'
+    return defaultBase
   }
 
   const sanitizedBase = configuredBase.replace(/\/$/, '')
@@ -22,7 +24,10 @@ const resolveBaseUrl = () => {
     return sanitizedBase
   }
 
-  // Allow relative proxy paths (e.g. /api or /.netlify/functions/football-data)
+  if (!import.meta.env.DEV && sanitizedBase === '/api') {
+    return '/.netlify/functions/football-data'
+  }
+
   return sanitizedBase.startsWith('/') ? sanitizedBase : `/${sanitizedBase}`
 }
 
