@@ -22,19 +22,20 @@ const resolveBaseUrl = () => {
     return sanitizedBase
   }
 
-  if (import.meta.env.DEV) {
-    // Only honor relative proxy paths when the Vite dev server can handle them.
-    return sanitizedBase.startsWith('/') ? sanitizedBase : `/${sanitizedBase}`
-  }
-
-  return 'https://api.football-data.org/v4'
+  // Allow relative proxy paths (e.g. /api or /.netlify/functions/football-data)
+  return sanitizedBase.startsWith('/') ? sanitizedBase : `/${sanitizedBase}`
 }
 
 const API_BASE = resolveBaseUrl()
-const API_TOKEN = import.meta.env.VITE_FOOTBALL_DATA_TOKEN
+const API_TOKEN = import.meta.env.VITE_FOOTBALL_DATA_TOKEN?.trim()
+const requiresClientToken = /^https?:\/\//i.test(API_BASE)
 
-const withAuthHeaders = () => {
-  if (!API_TOKEN || !API_TOKEN.trim()) {
+const withAuthHeaders = (): Record<string, string> => {
+  if (!requiresClientToken) {
+    return {}
+  }
+
+  if (!API_TOKEN) {
     throw new Error('Missing API token. Set VITE_FOOTBALL_DATA_TOKEN in your environment configuration.')
   }
 
